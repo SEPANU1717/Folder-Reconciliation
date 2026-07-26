@@ -351,6 +351,7 @@
   .badge.count{background:var(--brick-bg); color:var(--brick);}
   .badge.names{background:var(--brick-bg); color:var(--brick);}
   .badge.case{background:var(--amber-bg); color:var(--amber);}
+  .badge.unmatched{background:var(--brick-bg); color:var(--brick);}
   .badge.missingA, .badge.missingB{background:var(--brick-bg); color:var(--brick);}
 
   .row-detail{
@@ -476,6 +477,7 @@
   }
   .gcard.match{border-top-color:var(--pine);}
   .gcard.case{border-top-color:var(--amber);}
+  .gcard.unmatched{border-top-color:var(--brick);}
   .gcard.missingA, .gcard.missingB{border-top-color:var(--brick);}
   .gcard-top{
     display:flex;
@@ -546,6 +548,7 @@
     color:var(--ink);
   }
   .gname-val.diff{ color:var(--amber); font-weight:600; }
+  .gname-val.diff-hard{ color:var(--brick); font-weight:600; }
   .gname-empty{ color:var(--graphite-light); font-weight:400; }
 
   .empty-state{
@@ -917,6 +920,8 @@
     const cards = [];
 
     rows.forEach(row => {
+      const inA = foldersA.has(row.key);
+      const inB = foldersB.has(row.key);
       const imagesA = (foldersA.get(row.key) || {}).images || new Map();
       const imagesB = (foldersB.get(row.key) || {}).images || new Map();
 
@@ -930,13 +935,31 @@
         }
       });
 
-      row.onlyInA.filter(isImageFile).forEach(n => {
-        cards.push({ folder: row.label, folderKey: row.key, status: 'missingB', nameA: n, nameB: null, fileA: imagesA.get(n), fileB: null });
-      });
+      const leftoverA = row.onlyInA.filter(isImageFile);
+      const leftoverB = row.onlyInB.filter(isImageFile);
 
-      row.onlyInB.filter(isImageFile).forEach(n => {
-        cards.push({ folder: row.label, folderKey: row.key, status: 'missingA', nameA: null, nameB: n, fileA: null, fileB: imagesB.get(n) });
-      });
+      if (inA && inB){
+        // The folder itself exists on both sides — pair up remaining, differently-named
+        // images positionally so they can still be compared side by side, flagged as unmatched.
+        const pairCount = Math.min(leftoverA.length, leftoverB.length);
+        for (let i = 0; i < pairCount; i++){
+          const nA = leftoverA[i];
+          const nB = leftoverB[i];
+          cards.push({ folder: row.label, folderKey: row.key, status: 'unmatched', nameA: nA, nameB: nB, fileA: imagesA.get(nA), fileB: imagesB.get(nB) });
+        }
+        for (let i = pairCount; i < leftoverA.length; i++){
+          const n = leftoverA[i];
+          cards.push({ folder: row.label, folderKey: row.key, status: 'missingB', nameA: n, nameB: null, fileA: imagesA.get(n), fileB: null });
+        }
+        for (let i = pairCount; i < leftoverB.length; i++){
+          const n = leftoverB[i];
+          cards.push({ folder: row.label, folderKey: row.key, status: 'missingA', nameA: null, nameB: n, fileA: null, fileB: imagesB.get(n) });
+        }
+      } else {
+        // Whole folder only exists on one side — nothing to pair against.
+        leftoverA.forEach(n => cards.push({ folder: row.label, folderKey: row.key, status: 'missingB', nameA: n, nameB: null, fileA: imagesA.get(n), fileB: null }));
+        leftoverB.forEach(n => cards.push({ folder: row.label, folderKey: row.key, status: 'missingA', nameA: null, nameB: n, fileA: null, fileB: imagesB.get(n) }));
+      }
     });
 
     return cards;
@@ -948,6 +971,7 @@
       case 'count': return { cls: 'count', label: 'Count not equal' };
       case 'names': return { cls: 'names', label: 'Names not equal' };
       case 'case': return { cls: 'case', label: 'Case not same' };
+      case 'unmatched': return { cls: 'unmatched', label: 'Not matched' };
       case 'missingA': return { cls: 'missingA', label: 'Missing in A' };
       case 'missingB': return { cls: 'missingB', label: 'Missing in B' };
     }
@@ -966,7 +990,7 @@
     if (currentView === 'gallery'){
       const matched = currentCards.filter(c => c.status === 'match').length;
       const flagged = currentCards.filter(c => c.status === 'case').length;
-      const missing = currentCards.filter(c => c.status === 'missingA' || c.status === 'missingB').length;
+      const missing = currentCards.filter(c => c.status === 'missingA' || c.status === 'missingB' || c.status === 'unmatched').length;
       const loadedA = countImages(state.a.folders);
       const loadedB = countImages(state.b.folders);
       return `
@@ -1083,8 +1107,9 @@
       : `<div class="gthumb missing"><span class="gtag">B</span><span>No file</span></div>`;
 
     const namesDiffer = c.nameA && c.nameB && c.nameA !== c.nameB;
-    const rowA = `<div class="gname-row"><span class="gname-tag">A</span><span class="gname-val${namesDiffer ? ' diff' : ''}">${c.nameA ? escapeHtml(c.nameA) : '<span class=\"gname-empty\">— missing —</span>'}</span></div>`;
-    const rowB = `<div class="gname-row"><span class="gname-tag">B</span><span class="gname-val${namesDiffer ? ' diff' : ''}">${c.nameB ? escapeHtml(c.nameB) : '<span class=\"gname-empty\">— missing —</span>'}</span></div>`;
+    const diffClass = namesDiffer ? (c.status === 'unmatched' ? ' diff-hard' : ' diff') : '';
+    const rowA = `<div class="gname-row"><span class="gname-tag">A</span><span class="gname-val${diffClass}">${c.nameA ? escapeHtml(c.nameA) : '<span class=\"gname-empty\">— missing —</span>'}</span></div>`;
+    const rowB = `<div class="gname-row"><span class="gname-tag">B</span><span class="gname-val${diffClass}">${c.nameB ? escapeHtml(c.nameB) : '<span class=\"gname-empty\">— missing —</span>'}</span></div>`;
 
     return `
       <div class="gcard ${c.status}">
